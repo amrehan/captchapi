@@ -14,8 +14,8 @@ const FACILITATOR_URL = process.env.FACILITATOR_URL ?? "https://facilitator.open
 const PRICE = process.env.PRICE ?? "$0.30";
 const TWOCAPTCHA_KEY = process.env.TWOCAPTCHA_API_KEY!;
 
-if (!PAY_TO) {
-  console.error("Missing PAY_TO environment variable (your 0x wallet address)");
+if (!PAY_TO || !/^0x[0-9a-fA-F]{40}$/.test(PAY_TO)) {
+  console.error("PAY_TO must be a valid 0x EVM address");
   process.exit(1);
 }
 if (!TWOCAPTCHA_KEY) {
@@ -42,6 +42,15 @@ const solver = new Solver(TWOCAPTCHA_KEY);
 // --- App ---
 const app = new Hono();
 
+// Reject bodies over 1MB
+app.use(async (c, next) => {
+  const contentLength = Number(c.req.header("content-length") ?? 0);
+  if (contentLength > 1_000_000) {
+    return c.json({ error: "Request body too large (max 1MB)" }, 413);
+  }
+  return next();
+});
+
 // Free health check
 app.get("/health", (c) => c.json({ status: "ok", price: PRICE, network: NETWORK }));
 
@@ -64,8 +73,12 @@ app.post("/solve/image", async (c) => {
   if (!body.image) {
     return c.json({ error: "Missing 'image' field (base64 encoded)" }, 400);
   }
-  const result = await solver.imageCaptcha({ body: body.image });
-  return c.json({ solution: result.data });
+  try {
+    const result = await solver.imageCaptcha({ body: body.image });
+    return c.json({ solution: result.data });
+  } catch {
+    return c.json({ error: "Solve failed" }, 502);
+  }
 });
 
 // POST /solve/recaptcha
@@ -75,8 +88,12 @@ app.post("/solve/recaptcha", async (c) => {
   if (!body.sitekey || !body.pageurl) {
     return c.json({ error: "Missing 'sitekey' or 'pageurl'" }, 400);
   }
-  const result = await solver.recaptcha({ googlekey: body.sitekey, pageurl: body.pageurl });
-  return c.json({ solution: result.data });
+  try {
+    const result = await solver.recaptcha({ googlekey: body.sitekey, pageurl: body.pageurl });
+    return c.json({ solution: result.data });
+  } catch {
+    return c.json({ error: "Solve failed" }, 502);
+  }
 });
 
 // POST /solve/hcaptcha
@@ -86,8 +103,12 @@ app.post("/solve/hcaptcha", async (c) => {
   if (!body.sitekey || !body.pageurl) {
     return c.json({ error: "Missing 'sitekey' or 'pageurl'" }, 400);
   }
-  const result = await solver.hcaptcha({ sitekey: body.sitekey, pageurl: body.pageurl });
-  return c.json({ solution: result.data });
+  try {
+    const result = await solver.hcaptcha({ sitekey: body.sitekey, pageurl: body.pageurl });
+    return c.json({ solution: result.data });
+  } catch {
+    return c.json({ error: "Solve failed" }, 502);
+  }
 });
 
 // --- Start ---
